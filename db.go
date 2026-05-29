@@ -2,13 +2,19 @@ package main
 
 import (
 	"database/sql"
+	"os"
 	"fmt"
 	"sync"
 
 	_ "modernc.org/sqlite"
 )
 
-const DB_FILE = "./caine.db"
+func getDBPath() string {
+	if p := os.Getenv("DB_PATH"); p != "" {
+		return p
+	}
+	return "./caine.db"
+}
 
 var (
 	db   *sql.DB
@@ -58,7 +64,7 @@ func (c *kvCache) del(guildId, key string) {
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite", DB_FILE+"?_journal=WAL&_timeout=5000")
+	db, err = sql.Open("sqlite", getDBPath()+"?_journal=WAL&_timeout=5000")
 	if err != nil {
 		panic(fmt.Sprintf("❌ Gagal buka SQLite: %v", err))
 	}
@@ -345,6 +351,156 @@ func getGoodbyeMessage(guildId string) string {
 func setGoodbyeMessage(guildId, msg string) { kvSet(guildId, "goodbye_msg", msg) }
 
 // ============================================================
+// AUTO ROLE
+// ============================================================
+
+func getAutoRole(guildId string) string   { return kvGet(guildId, "auto_role") }
+func setAutoRole(guildId, roleId string)  { kvSet(guildId, "auto_role", roleId) }
+func removeAutoRole(guildId string)       { kvDel(guildId, "auto_role") }
+
+// ============================================================
+// PERSONA & MODEL
+// ============================================================
+
+func getGuildSystemPrompt(guildId string) string {
+	v := kvGet(guildId, "system_prompt")
+	if v == "" {
+		return DEFAULT_SYSTEM_PROMPT
+	}
+	return v
+}
+func setGuildSystemPrompt(guildId, prompt string) { kvSet(guildId, "system_prompt", prompt) }
+
+func getGuildModel(guildId string) string {
+	v := kvGet(guildId, "model")
+	if v == "" {
+		return DEFAULT_MODEL
+	}
+	return v
+}
+func setGuildModel(guildId, model string) { kvSet(guildId, "model", model) }
+
+// ============================================================
+// LEVEL CHANNEL
+// ============================================================
+
+func getLevelChannel(guildId string) string { return kvGet(guildId, "level_channel") }
+func setLevelChannel(guildId, ch string)    { kvSet(guildId, "level_channel", ch) }
+
+// ============================================================
+// XP
+// ============================================================
+
+type XPData struct {
+	XP          int   `json:"xp"`
+	Level       int   `json:"level"`
+	LastMessage int64 `json:"lastMessage"`
+}
+
+func getUserXP(userId, guildId string) *XPData {
+	data := &XPData{}
+	err := db.QueryRow(`SELECT xp, level, last_message FROM xp WHERE guild_id=? AND user_id=?`, guildId, userId).
+		Scan(&data.XP, &data.Level, &data.LastMessage)
+	if err != nil {
+		return &XPData{}
+	}
+	return data
+}
+
+func setUserXP(userId, guildId string, data *XPData) {
+	if _, err := db.Exec(`INSERT OR REPLACE INTO xp (guild_id, user_id, xp, level, last_message) VALUES (?,?,?,?,?)`,
+		guildId, userId, data.XP, data.Level, data.LastMessage); err != nil {
+		fmt.Printf("⚠️ setUserXP: %v\n", err)
+	}
+}
+
+func getAllXP(guildId string) []struct {
+	UserID string
+	Data   *XPData
+} {
+	rows, err := db.Query(`SELECT user_id, xp, level FROM xp WHERE guild_id=? ORDER BY level DESC, xp DESC LIMIT 10`, guildId)
+	if err != nil {
+		fmt.Printf("⚠️ getAllXP: %v\n", err)
+		return nil
+	}
+	defer rows.Close()
+	var result []struct {
+		UserID string
+		Data   *XPData
+	}
+	for rows.Next() {
+		var uid string
+		data := &XPData{}
+		if err := rows.Scan(&uid, &data.XP, &data.Level); err != nil {
+			fmt.Printf("⚠️ getAllXP scan: %v\n", err)
+			continue
+		}
+		result = append(result, struct {
+			UserID string
+			Data   *XPData
+		}{uid, data})
+	}
+	return result
+}
+
+// ============================================================
+// AFK
+// ============================================================
+
+type AFKData struct {
+	Reason string `json:"reason"`
+	Time   int64  `json:"time"`
+}
+
+func getAfkUser(userId, guildId string) *AFKData {
+	data := &AFKData{}
+	err := db.QueryRow(`SELECT reason, time FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId).
+		Scan(&data.Reason, &data.Time)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func setAfkUser(userId, guildId, reason string) {
+	if _, err := db.Exec(`INSERT OR REPLACE INTO afk (guild_id, user_id, reason, time) VALUES (?,?,?,?)`,
+		guildId, userId, reason, nowMs()); err != nil {
+		fmt.Printf("⚠️ setAfkUser: %v\n", err)
+	}
+}
+
+func removeAfkUser(userId, guildId string) {
+	if _, err := db.Exec(`DELETE FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId); err != nil {
+		fmt.Printf("⚠️ removeAfkUser: %v\n", err)
+	}
+}
+
+func getAllAfk(guildId string) map[string]*AFKData {
+	rows, err := db.Query(`SELECT user_id, reason, time FROM afk WHERE guild_id=?`, guildId)
+	if err != nil {
+		fmt.Printf("⚠️ getAllAfk: %v\n", err)
+		return nil
+	}
+	defer rows.Close()
+	result := make(map[string]*AFKData)
+	for rows.Next() {
+		var uid string
+		data := &AFKData{}
+		if err := rows.Scan(&uid, &data.Reason, &data.Time); err != nil {
+			fmt.Printf("⚠️ getAllAfk scan: %v\n", err)
+			continue
+		}
+		result[uid] = data
+	}
+	return result
+}
+
+// Warning struct (dipakai di moderation.go)
+type Warning struct {
+	Reason string
+	Time   string
+}
+==============
 // AUTO ROLE
 // ============================================================
 
