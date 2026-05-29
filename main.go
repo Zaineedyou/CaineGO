@@ -129,7 +129,7 @@ func runBot() {
 
 func onReady(s *discordgo.Session, r *discordgo.Ready) {
 	// Suppress error log yang ga penting dari discordgo
-	s.LogLevel = discordgo.LogWarning
+	s.LogLevel = discordgo.LogError
 	fmt.Printf("✅ Bot online: %s\n", r.User.Username)
 	s.UpdateCustomStatus("Property Of Caineedyou | Developed By Zaineedyou")
 
@@ -363,6 +363,12 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			imageURL = att.URL
 			break
 		}
+	}
+
+	// AI rate limit — max 10 request/menit per user
+	if isAIRateLimited(m.Author.ID) {
+		s.ChannelMessageSendReply(m.ChannelID, "⏱️ Slow down! Kamu terlalu banyak ngirim pesan ke Caine. Tunggu sebentar ya.", m.Reference())
+		return
 	}
 
 	s.ChannelTyping(m.ChannelID)
