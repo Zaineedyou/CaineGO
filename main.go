@@ -23,7 +23,6 @@ var (
 	DEFAULT_SYSTEM_PROMPT string
 	DEFAULT_MODEL         = "llama-3.3-70b-versatile"
 
-	// Flag biar slash commands cuma di-register sekali, bukan tiap reconnect
 	slashCommandsRegistered bool
 )
 
@@ -38,7 +37,6 @@ func getEnvOrDefault(key, def string) string {
 }
 
 func main() {
-	// --version flag
 	for _, arg := range os.Args[1:] {
 		if arg == "--version" || arg == "-v" {
 			fmt.Println("Caine Bot v" + VERSION)
@@ -48,26 +46,21 @@ func main() {
 
 	rand.Seed(time.Now().UnixNano())
 
-	// Load .env file kalau ada
 	godotenv.Load()
 
-	// Baca env SETELAH godotenv.Load()
 	DISCORD_TOKEN = os.Getenv("DISCORD_TOKEN")
 	GROQ_API_KEY = os.Getenv("GROQ_API_KEY")
 	BOT_PREFIX = getEnvOrDefault("BOT_PREFIX", "Caine")
 	DEFAULT_SYSTEM_PROMPT = getEnvOrDefault("SYSTEM_PROMPT",
 		"Kamu adalah AI asisten yang nyantai dan gaul. Jawab pake bahasa Indonesia slang yang natural, kayak ngobrol sama teman. Tetep informatif dan tepat tapi ga kaku.")
 
-	// Validasi env wajib
 	if DISCORD_TOKEN == "" || GROQ_API_KEY == "" {
 		fmt.Println("❌ DISCORD_TOKEN dan GROQ_API_KEY wajib diset!")
 		os.Exit(1)
 	}
 
-	// Init DB cache
 	initDB()
 
-	// Graceful shutdown
 	go func() {
 		sc := make(chan os.Signal, 1)
 		signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)
@@ -77,9 +70,6 @@ func main() {
 		os.Exit(0)
 	}()
 
-	// runBot() sekarang hanya return kalau dg.Open() gagal (misal token salah, no network).
-	// discordgo sudah handle reconnect otomatis untuk disconnect sementara di dalam runBot().
-	// Loop ini hanya sebagai fallback kalau koneksi awal betul-betul gagal.
 	retryDelay := 5 * time.Second
 	for {
 		runBot() // hanya return kalau Open() gagal
@@ -119,29 +109,20 @@ func runBot() {
 
 	fmt.Println("✅ Bot running. CTRL-C to exit.")
 
-	// discordgo sudah handle reconnect otomatis secara internal.
-	// Kita TIDAK pakai Disconnect handler untuk close channel done —
-	// itu penyebab looping: setiap disconnect sementara (network blip, timeout)
-	// akan menutup done lalu main() spawn runBot() baru tanpa henti.
-	// Cukup block di sini selamanya, shutdown hanya lewat OS signal (SIGINT/SIGTERM).
 	select {}
 }
 
 func onReady(s *discordgo.Session, r *discordgo.Ready) {
-	// Suppress error log yang ga penting dari discordgo
 	s.LogLevel = discordgo.LogError
 	fmt.Printf("✅ Bot online: %s\n", r.User.Username)
 	s.UpdateCustomStatus("Property Of Caineedyou | Developed By Zaineedyou")
 
-	// Reset retryDelay secara implisit dengan flag — kalau bot berhasil online,
-	// artinya koneksi sukses. Slash commands hanya didaftarkan SEKALI.
-	// Kalau didaftarkan ulang tiap reconnect, Discord akan rate-limit dan
-	// langsung disconnect lagi — itulah penyebab looping cepat sebelumnya.
 	if !slashCommandsRegistered {
 		commands := []*discordgo.ApplicationCommand{
 			{Name: "info", Description: "Lihat info dan status bot Caine"},
 			{Name: "dashboard", Description: "Buka dashboard pengaturan bot (Admin only)"},
 			{Name: "help", Description: "Lihat semua command yang tersedia"},
+			{Name: "healthcheck", Description: "Cek status semua komponen bot (Admin only)"},
 		}
 		for _, cmd := range commands {
 			s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
@@ -282,7 +263,6 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			break
 		}
 	}
-	// @everyone juga trigger bot
 	if m.MentionEveryone {
 		isMentioned = true
 	}
@@ -462,6 +442,9 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 				Flags: discordgo.MessageFlagsEphemeral,
 			},
 		})
+
+	case "healthcheck":
+		handleHealthCheck(s, i)
 
 	case "dashboard":
 		if i.Member == nil {
