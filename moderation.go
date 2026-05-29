@@ -326,7 +326,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			return true
 		}
 		reason := orDefault(strings.Join(args[2:], " "), "Tidak ada alasan")
-		s.GuildMemberDeleteWithReason(guildId, targetId, reason)
+		if err := s.GuildMemberDeleteWithReason(guildId, targetId, reason); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal kick: %v", err))
+			return true
+		}
 		target, _ := s.User(targetId)
 		tag := targetId
 		if target != nil {
@@ -349,7 +352,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			return true
 		}
 		reason := orDefault(strings.Join(args[2:], " "), "Tidak ada alasan")
-		s.GuildBanCreateWithReason(guildId, targetId, reason, 0)
+		if err := s.GuildBanCreateWithReason(guildId, targetId, reason, 0); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal ban: %v", err))
+			return true
+		}
 		target, _ := s.User(targetId)
 		tag := targetId
 		if target != nil {
@@ -371,7 +377,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			return true
 		}
 		userId := args[1]
-		s.GuildBanDelete(guildId, userId)
+		if err := s.GuildBanDelete(guildId, userId); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal unban: %v", err))
+			return true
+		}
 		logMod(s, "Unban", m.Author.Username, userId, "-", guildId)
 		replyMsg(fmt.Sprintf("✅ **%s** di-unban.", userId))
 		return true
@@ -398,7 +407,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			reason = strings.Join(args[3:], " ")
 		}
 		until := time.Now().Add(time.Duration(minutes) * time.Minute)
-		s.GuildMemberTimeout(guildId, targetId, &until)
+		if err := s.GuildMemberTimeout(guildId, targetId, &until); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal timeout: %v", err))
+			return true
+		}
 		target, _ := s.User(targetId)
 		tag := targetId
 		if target != nil {
@@ -420,7 +432,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Mention siapa.")
 			return true
 		}
-		s.GuildMemberTimeout(guildId, targetId, nil)
+		if err := s.GuildMemberTimeout(guildId, targetId, nil); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal untimeout: %v", err))
+			return true
+		}
 		target, _ := s.User(targetId)
 		tag := targetId
 		if target != nil {
@@ -509,7 +524,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 		for _, msg := range messages {
 			ids = append(ids, msg.ID)
 		}
-		s.ChannelMessagesBulkDelete(m.ChannelID, ids)
+		if err := s.ChannelMessagesBulkDelete(m.ChannelID, ids); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal hapus pesan: %v", err))
+			return true
+		}
 		replyMsg(fmt.Sprintf("🗑️ %d pesan dihapus.", len(ids)-1))
 		return true
 	}
@@ -521,7 +539,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			return true
 		}
 		deny := int64(discordgo.PermissionSendMessages)
-		s.ChannelPermissionSet(m.ChannelID, guildId, discordgo.PermissionOverwriteTypeRole, 0, deny)
+		if err := s.ChannelPermissionSet(m.ChannelID, guildId, discordgo.PermissionOverwriteTypeRole, 0, deny); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal lock: %v", err))
+			return true
+		}
 		replyMsg("🔒 Channel dikunci.")
 		return true
 	}
@@ -532,7 +553,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ No permission.")
 			return true
 		}
-		s.ChannelPermissionDelete(m.ChannelID, guildId)
+		if err := s.ChannelPermissionDelete(m.ChannelID, guildId); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal unlock: %v", err))
+			return true
+		}
 		replyMsg("🔓 Channel dibuka.")
 		return true
 	}
@@ -549,7 +573,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 				seconds = n
 			}
 		}
-		s.ChannelEditComplex(m.ChannelID, &discordgo.ChannelEdit{RateLimitPerUser: &seconds})
+		if _, err := s.ChannelEditComplex(m.ChannelID, &discordgo.ChannelEdit{RateLimitPerUser: &seconds}); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal set slowmode: %v", err))
+			return true
+		}
 		if seconds == 0 {
 			replyMsg("✅ Slowmode dimatiin.")
 		} else {
@@ -570,7 +597,10 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			return true
 		}
 		newNick := strings.Join(args[2:], " ")
-		s.GuildMemberNickname(guildId, targetId, newNick)
+		if err := s.GuildMemberNickname(guildId, targetId, newNick); err != nil {
+			replyMsg(fmt.Sprintf("❌ Gagal ganti nickname: %v", err))
+			return true
+		}
 		replyMsg(fmt.Sprintf("✅ Nickname <@%s> diubah ke **%s**.", targetId, newNick))
 		return true
 	}
@@ -589,10 +619,16 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 		targetId := m.Mentions[0].ID
 		roleId := m.MentionRoles[0]
 		if action == "add" {
-			s.GuildMemberRoleAdd(guildId, targetId, roleId)
+			if err := s.GuildMemberRoleAdd(guildId, targetId, roleId); err != nil {
+				replyMsg(fmt.Sprintf("❌ Gagal tambah role: %v", err))
+				return true
+			}
 			replyMsg(fmt.Sprintf("✅ Role <@&%s> ditambah ke <@%s>.", roleId, targetId))
 		} else if action == "remove" {
-			s.GuildMemberRoleRemove(guildId, targetId, roleId)
+			if err := s.GuildMemberRoleRemove(guildId, targetId, roleId); err != nil {
+				replyMsg(fmt.Sprintf("❌ Gagal hapus role: %v", err))
+				return true
+			}
 			replyMsg(fmt.Sprintf("✅ Role <@&%s> dihapus dari <@%s>.", roleId, targetId))
 		} else {
 			replyMsg("❌ Pakai `add` atau `remove`.")
