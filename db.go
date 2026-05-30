@@ -64,7 +64,7 @@ func (c *kvCache) del(guildId, key string) {
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite", getDBPath()+"?_journal=WAL&_timeout=5000")
+	db, err = sql.Open("sqlite", getDBPath()+"?_journal=WAL&_busy_timeout=5000&_timeout=5000")
 	if err != nil {
 		panic(fmt.Sprintf("❌ Gagal buka SQLite: %v", err))
 	}
