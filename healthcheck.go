@@ -11,12 +11,11 @@ import (
 // Runs component health checks and reports results. Admin only.
 
 func handleHealthCheck(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	// Admin only
-	if i.Member == nil || i.Member.Permissions&discordgo.PermissionAdministrator == 0 {
+	if !isBotManager(i) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
 			Data: &discordgo.InteractionResponseData{
-				Content: "❌ Khusus admin.",
+				Content: "❌ Khusus admin atau bot owner.",
 				Flags:   discordgo.MessageFlagsEphemeral,
 			},
 		})
