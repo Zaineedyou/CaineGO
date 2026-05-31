@@ -2,12 +2,14 @@ package main
 
 import (
 	"fmt"
-	"math/rand"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
+
+	"sync"
 
 	"github.com/bwmarrin/discordgo"
 	"github.com/joho/godotenv"
@@ -16,17 +18,21 @@ import (
 const VERSION = "1.0.0"
 
 var (
-	DISCORD_TOKEN string
-	GROQ_API_KEY  string
-	BOT_PREFIX    string
+	DISCORD_TOKEN  string
+	GROQ_API_KEY   string
+	BOT_PREFIX     string
+	BOT_OWNER_ID   string
 
 	DEFAULT_SYSTEM_PROMPT string
 	DEFAULT_MODEL         = "llama-3.3-70b-versatile"
 
+	slashCommandsMu         sync.Mutex
 	slashCommandsRegistered bool
 )
 
-const MAX_HISTORY = 30
+// MAX_HISTORY is the default conversation history limit per channel.
+// Can be overridden per guild via the dashboard or sethistory command.
+var MAX_HISTORY int
 
 func getEnvOrDefault(key, def string) string {
 	v := os.Getenv(key)
@@ -34,6 +40,37 @@ func getEnvOrDefault(key, def string) string {
 		return def
 	}
 	return v
+}
+
+func getEnvInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		return def
+	}
+	return n
+}
+
+// isBotManager returns true if the interaction user is a server admin or the bot owner.
+func isBotManager(i *discordgo.InteractionCreate) bool {
+	if BOT_OWNER_ID != "" {
+		var userID string
+		if i.Member != nil {
+			userID = i.Member.User.ID
+		} else if i.User != nil {
+			userID = i.User.ID
+		}
+		if userID == BOT_OWNER_ID {
+			return true
+		}
+	}
+	if i.Member == nil {
+		return false
+	}
+	return i.Member.Permissions&discordgo.PermissionAdministrator != 0
 }
 
 func main() {
@@ -44,8 +81,6 @@ func main() {
 		}
 	}
 
-	rand.Seed(time.Now().UnixNano())
-
 	godotenv.Load()
 
 	DISCORD_TOKEN = os.Getenv("DISCORD_TOKEN")
@@ -53,6 +88,15 @@ func main() {
 	BOT_PREFIX = getEnvOrDefault("BOT_PREFIX", "Caine")
 	DEFAULT_SYSTEM_PROMPT = getEnvOrDefault("SYSTEM_PROMPT",
 		"Kamu adalah AI asisten yang nyantai dan gaul. Jawab pake bahasa Indonesia slang yang natural, kayak ngobrol sama teman. Tetep informatif dan tepat tapi ga kaku.")
+
+	BOT_OWNER_ID = os.Getenv("BOT_OWNER_ID")
+	MAX_HISTORY = getEnvInt("MAX_HISTORY", 30)
+	if v := getEnvInt("AI_RATE_MAX", 0); v > 0 {
+		AI_RATE_MAX = v
+	}
+	if v := getEnvInt("AI_RATE_WINDOW_SEC", 0); v > 0 {
+		AI_RATE_WINDOW = int64(v * 1000)
+	}
 
 	if DISCORD_TOKEN == "" || GROQ_API_KEY == "" {
 		fmt.Println("❌ DISCORD_TOKEN and GROQ_API_KEY are required")
@@ -117,6 +161,7 @@ func onReady(s *discordgo.Session, r *discordgo.Ready) {
 	fmt.Printf("✅ Bot online: %s\n", r.User.Username)
 	s.UpdateCustomStatus("Property Of Caineedyou | Developed By Zaineedyou")
 
+	slashCommandsMu.Lock()
 	if !slashCommandsRegistered {
 		commands := []*discordgo.ApplicationCommand{
 			{Name: "info", Description: "Lihat info dan status bot Caine"},
@@ -130,6 +175,7 @@ func onReady(s *discordgo.Session, r *discordgo.Ready) {
 		slashCommandsRegistered = true
 		fmt.Println("✅ Slash commands registered")
 	}
+	slashCommandsMu.Unlock()
 }
 
 func onGuildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
@@ -323,10 +369,11 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			"`Caine leaderboard` — top 10 XP\n" +
 			"`Caine status` — status bot\n" +
 			"`Caine setmodel <alias>` — ganti model AI\n" +
+			"`Caine sethistory <angka>` — set batas history chat\n" +
 			"`/info` — info bot\n" +
 			"`/dashboard` — buka dashboard (admin)\n\n" +
 			"**Moderasi:** kick, ban, unban, timeout, untimeout, warn, warnings, clearwarn, clear, lock, unlock, slowmode, nick, role add/remove\n\n" +
-			"**Admin:** addword, removeword, words, enable, disable, setlog, setwelcome, setgoodbye, setwelcomemsg, setgoodbyemsg, autorole, removeautorole, setlevelchannel, setpersona, setmodel"
+			"**Admin:** addword, removeword, words, enable, disable, setlog, setwelcome, setgoodbye, setwelcomemsg, setgoodbyemsg, autorole, removeautorole, setlevelchannel, setpersona, setmodel, sethistory"
 		s.ChannelMessageSendReply(m.ChannelID, helpText, m.Reference())
 		return
 	}
@@ -443,15 +490,11 @@ func handleSlashCommand(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		handleHealthCheck(s, i)
 
 	case "dashboard":
-		if i.Member == nil {
-			return
-		}
-		perms := i.Member.Permissions
-		if perms&discordgo.PermissionAdministrator == 0 {
+		if !isBotManager(i) {
 			s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 				Type: discordgo.InteractionResponseChannelMessageWithSource,
 				Data: &discordgo.InteractionResponseData{
-					Content: "❌ Khusus admin.",
+					Content: "❌ Khusus admin atau bot owner.",
 					Flags:   discordgo.MessageFlagsEphemeral,
 				},
 			})
@@ -518,10 +561,10 @@ type modalData struct {
 }
 
 func handleButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreate) {
-	if i.Member == nil || i.Member.Permissions&discordgo.PermissionAdministrator == 0 {
+	if !isBotManager(i) {
 		s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 			Type: discordgo.InteractionResponseChannelMessageWithSource,
-			Data: &discordgo.InteractionResponseData{Content: "❌ Khusus admin.", Flags: discordgo.MessageFlagsEphemeral},
+			Data: &discordgo.InteractionResponseData{Content: "❌ Khusus admin atau bot owner.", Flags: discordgo.MessageFlagsEphemeral},
 		})
 		return
 	}
@@ -874,10 +917,26 @@ func handleButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 					{Name: "⏱️ Uptime", Value: getUptime(), Inline: true},
 					{Name: "🌐 Servers", Value: fmt.Sprintf("%d", len(s.State.Guilds)), Inline: true},
 					{Name: "📡 Status", Value: "🟢 Online", Inline: true},
+					{Name: "📜 History Limit", Value: fmt.Sprintf("%d messages", getGuildMaxHistory(guildId)), Inline: true},
 				},
 			},
-			[]discordgo.MessageComponent{backRow()},
+			[]discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.Button{Label: "Set History Limit", CustomID: "dash_sethistory", Style: discordgo.PrimaryButton},
+				}},
+				backRow(),
+			},
 		)
+
+	case "dash_sethistory":
+		showModal(modalData{
+			CustomID: "modal_sethistory", Title: "Set History Limit",
+			Components: []discordgo.MessageComponent{
+				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+					discordgo.TextInput{CustomID: "limit", Label: "Jumlah pesan (5-100)", Style: discordgo.TextInputShort, Required: true, Placeholder: fmt.Sprintf("Default: %d", MAX_HISTORY)},
+				}},
+			},
+		})
 	}
 }
 
@@ -944,5 +1003,14 @@ func handleModalSubmit(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		word := strings.ToLower(getField("word"))
 		removeBannedWord(guildId, word)
 		reply(fmt.Sprintf("✅ **%s** dihapus dari blacklist!", word))
+	case "modal_sethistory":
+		limitStr := getField("limit")
+		limit, err := strconv.Atoi(limitStr)
+		if err != nil || limit < 5 || limit > 100 {
+			reply("❌ Masukkan angka antara 5-100.")
+			return
+		}
+		setGuildMaxHistory(guildId, limit)
+		reply(fmt.Sprintf("✅ History limit diset ke **%d** pesan.", limit))
 	}
 }
