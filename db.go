@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"strconv"
 	"os"
 	"fmt"
 	"sync"
@@ -22,9 +23,6 @@ var (
 )
 
 // In-memory cache for per-guild config (kv store).
-// Avoids SQLite reads on every message for rarely-changed data.
-// Invalidated on every kvSet/kvDel call.
-
 type kvCache struct {
 	mu    sync.RWMutex
 	store map[string]string 
@@ -71,7 +69,9 @@ func initDB() {
 }
 
 func flushDB() {
-	// SQLite auto-commits; no manual flush needed
+	if db != nil {
+		db.Close()
+	}
 }
 
 func createTables() {
@@ -448,4 +448,21 @@ func getAllAfk(guildId string) map[string]*AFKData {
 type Warning struct {
 	Reason string
 	Time   string
+}
+
+// getGuildMaxHistory returns the per-guild history limit, falling back to the global MAX_HISTORY.
+func getGuildMaxHistory(guildId string) int {
+	v := kvGet(guildId, "max_history")
+	if v == "" {
+		return MAX_HISTORY
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil || n < 5 {
+		return MAX_HISTORY
+	}
+	return n
+}
+
+func setGuildMaxHistory(guildId string, limit int) {
+	kvSet(guildId, "max_history", strconv.Itoa(limit))
 }
