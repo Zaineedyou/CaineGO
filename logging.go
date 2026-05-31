@@ -6,8 +6,7 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// Log hanya ke guild log channel masing-masing server
-// Tidak ada global log — privasi terjaga
+// sendGuildLog sends an embed to the configured log channel for the guild.
 func sendGuildLog(s *discordgo.Session, guildId string, embed *discordgo.MessageEmbed) {
 	if guildId == "" {
 		return
@@ -19,10 +18,10 @@ func sendGuildLog(s *discordgo.Session, guildId string, embed *discordgo.Message
 	s.ChannelMessageSendEmbed(channelId, embed)
 }
 
-// logChat hanya log ke guild log channel, tidak ke DM
+// logChat logs an AI interaction to the guild log channel. DMs are never logged.
 func logChat(s *discordgo.Session, m *discordgo.Message, userText, reply string) {
 	if m.GuildID == "" {
-		return // DM tidak di-log — privasi user
+		return // DMs are not logged
 	}
 	embed := &discordgo.MessageEmbed{
 		Color: 0x5865f2,
