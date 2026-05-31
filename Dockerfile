@@ -22,9 +22,6 @@ RUN apk add --no-cache ca-certificates tzdata
 
 COPY --from=builder /app/caine .
 
-# Data directory untuk SQLite database
-VOLUME ["/app/data"]
-
 # Jalankan sebagai non-root user
 RUN addgroup -S botgroup && adduser -S botuser -G botgroup
 USER botuser
