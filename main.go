@@ -55,7 +55,7 @@ func main() {
 		"Kamu adalah AI asisten yang nyantai dan gaul. Jawab pake bahasa Indonesia slang yang natural, kayak ngobrol sama teman. Tetep informatif dan tepat tapi ga kaku.")
 
 	if DISCORD_TOKEN == "" || GROQ_API_KEY == "" {
-		fmt.Println("❌ DISCORD_TOKEN dan GROQ_API_KEY wajib diset!")
+		fmt.Println("❌ DISCORD_TOKEN and GROQ_API_KEY are required")
 		os.Exit(1)
 	}
 
@@ -65,7 +65,7 @@ func main() {
 		sc := make(chan os.Signal, 1)
 		signal.Notify(sc, syscall.SIGINT, syscall.SIGTERM)
 		<-sc
-		fmt.Println("\n🛑 Shutting down, saving data...")
+		fmt.Println("\n🛑 Shutting down...")
 		flushDB()
 		os.Exit(0)
 	}()
@@ -73,7 +73,7 @@ func main() {
 	retryDelay := 5 * time.Second
 	for {
 		runBot() // hanya return kalau Open() gagal
-		fmt.Printf("⚠️ Gagal konek ke Discord, retry in %s...\n", retryDelay)
+		fmt.Printf("⚠️ Failed to connect to Discord, retrying in %s...\n", retryDelay)
 		time.Sleep(retryDelay)
 		if retryDelay < 60*time.Second {
 			retryDelay *= 2
@@ -84,7 +84,7 @@ func main() {
 func runBot() {
 	dg, err := discordgo.New("Bot " + DISCORD_TOKEN)
 	if err != nil {
-		fmt.Println("❌ Error creating session:", err)
+		fmt.Println("❌ Failed to create session:", err)
 		return
 	}
 
@@ -102,12 +102,12 @@ func runBot() {
 
 	err = dg.Open()
 	if err != nil {
-		fmt.Println("❌ Error opening connection:", err)
+		fmt.Println("❌ Failed to open connection:", err)
 		return
 	}
 	defer dg.Close()
 
-	fmt.Println("✅ Bot running. CTRL-C to exit.")
+	fmt.Println("✅ Bot running. Press CTRL-C to exit.")
 
 	select {}
 }
@@ -128,18 +128,18 @@ func onReady(s *discordgo.Session, r *discordgo.Ready) {
 			s.ApplicationCommandCreate(s.State.User.ID, "", cmd)
 		}
 		slashCommandsRegistered = true
-		fmt.Println("✅ Slash commands terdaftar")
+		fmt.Println("✅ Slash commands registered")
 	}
 }
 
 func onGuildMemberAdd(s *discordgo.Session, m *discordgo.GuildMemberAdd) {
-	// Auto-role
+	
 	roleId := getAutoRole(m.GuildID)
 	if roleId != "" {
 		s.GuildMemberRoleAdd(m.GuildID, m.User.ID, roleId)
 	}
 
-	// Welcome
+	
 	chId := getWelcomeChannel(m.GuildID)
 	if chId == "" {
 		return
@@ -194,7 +194,7 @@ func onGuildMemberRemove(s *discordgo.Session, m *discordgo.GuildMemberRemove) {
 func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	defer func() {
 		if r := recover(); r != nil {
-			fmt.Println("⚠️ Recovered panic di onMessageCreate:", r)
+			fmt.Println("⚠️ Panic recovered in onMessageCreate:", r)
 		}
 	}()
 
@@ -202,12 +202,12 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Rate limiter — ignore kalau spam
+	
 	if isRateLimited(m.Author.ID) {
 		return
 	}
 
-	// Automod
+	
 	if m.GuildID != "" {
 		lower := strings.ToLower(m.Content)
 		for _, word := range getBannedWords(m.GuildID) {
@@ -220,19 +220,19 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	// XP
+	
 	if m.GuildID != "" {
 		handleXP(s, m.Message)
 	}
 
-	// AFK auto-unafk
+	
 	if m.GuildID != "" {
 		if getAfkUser(m.Author.ID, m.GuildID) != nil {
 			removeAfkUser(m.Author.ID, m.GuildID)
 			s.ChannelMessageSendReply(m.ChannelID, fmt.Sprintf("✅ Welcome back <@%s>! AFK kamu dihapus.", m.Author.ID), m.Reference())
 		}
 
-		// AFK mention check
+		
 		for _, u := range m.Mentions {
 			afkData := getAfkUser(u.ID, m.GuildID)
 			if afkData != nil && u.ID != m.Author.ID {
@@ -250,7 +250,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	// Channel disable check
+	
 	if m.GuildID != "" && isChannelDisabled(m.GuildID, m.ChannelID) {
 		return
 	}
@@ -303,7 +303,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	// Simple commands
+	
 	if strings.ToLower(userText) == "reset" || strings.ToLower(userText) == "clear" {
 		clearHistory(historyKey)
 		s.ChannelMessageSendReply(m.ChannelID, "🧹 Memory kita udah di-reset sayang!", m.Reference())
@@ -331,12 +331,12 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
-	// Moderation commands
+	
 	if handleModeration(s, m.Message, userText) {
 		return
 	}
 
-	// AI chat
+	
 	var imageURL string
 	for _, att := range m.Attachments {
 		if strings.HasPrefix(att.ContentType, "image/") {
@@ -345,7 +345,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		}
 	}
 
-	// AI rate limit — max 10 request/menit per user
+	// AI rate limit: max 10 requests/min per user
 	if isAIRateLimited(m.Author.ID) {
 		s.ChannelMessageSendReply(m.ChannelID, "⏱️ Slow down! Kamu terlalu banyak ngirim pesan ke Caine. Tunggu sebentar ya.", m.Reference())
 		return
@@ -367,7 +367,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 
 	if aiErr != nil {
-		fmt.Println("AI Error:", aiErr)
+		fmt.Println("AI error:", aiErr)
 		s.ChannelMessageSendReply(m.ChannelID, "❌ Ada error sayang, coba lagi ya 🙏", m.Reference())
 		return
 	}
@@ -378,10 +378,6 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 	}
 	logChat(s, m.Message, userText, reply)
 }
-
-// ============================================================
-// SLASH COMMANDS + DASHBOARD
-// ============================================================
 
 func onInteractionCreate(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	switch i.Type {
