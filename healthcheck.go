@@ -7,9 +7,8 @@ import (
 	"github.com/bwmarrin/discordgo"
 )
 
-// /healthcheck — slash command untuk cek status semua komponen bot.
-// Hanya bisa dijalankan oleh admin server.
-// Register command ini di onReady sama seperti command lain.
+// handleHealthCheck handles the /healthcheck slash command.
+// Runs component health checks and reports results. Admin only.
 
 func handleHealthCheck(s *discordgo.Session, i *discordgo.InteractionCreate) {
 	// Admin only
@@ -24,7 +23,7 @@ func handleHealthCheck(s *discordgo.Session, i *discordgo.InteractionCreate) {
 		return
 	}
 
-	// Defer response dulu karena test bisa butuh waktu
+	// Defer the response since health checks may take a moment
 	s.InteractionRespond(i.Interaction, &discordgo.InteractionResponse{
 		Type: discordgo.InteractionResponseDeferredChannelMessageWithSource,
 		Data: &discordgo.InteractionResponseData{Flags: discordgo.MessageFlagsEphemeral},
@@ -77,19 +76,19 @@ type checkResult struct {
 func runHealthChecks(s *discordgo.Session, guildId string) []checkResult {
 	var results []checkResult
 
-	// 1. SQLite — read/write test
+	// SQLite read/write
 	results = append(results, checkDB(guildId))
 
-	// 2. Cache — pastiin kvGet baca dari cache setelah kvSet
+	// In-memory cache consistency
 	results = append(results, checkCache(guildId))
 
-	// 3. Groq API — cek connectivity dengan request minimal
+	// Groq API connectivity
 	results = append(results, checkGroq())
 
-	// 4. Bot permissions di guild
+	// Bot permissions
 	results = append(results, checkBotPerms(s, guildId))
 
-	// 5. Discord latency
+	// Discord latency
 	results = append(results, checkLatency(s))
 
 	return results
@@ -113,10 +112,10 @@ func checkCache(guildId string) checkResult {
 	testKey := "__cache_test__"
 	testVal := "cache_ping"
 
-	// Set via kvSet (otomatis masuk cache)
+	// kvSet also populates the cache
 	kvSet(guildId, testKey, testVal)
 
-	// Cek apakah cache hit
+	// Verify cache was populated
 	if v, ok := cache.get(guildId, testKey); !ok || v != testVal {
 		kvDel(guildId, testKey)
 		return checkResult{"In-memory Cache", false, "Cache miss setelah kvSet"}
@@ -124,7 +123,7 @@ func checkCache(guildId string) checkResult {
 
 	kvDel(guildId, testKey)
 
-	// Pastiin cache di-invalidate setelah kvDel
+	// Verify cache is invalidated after delete
 	if _, ok := cache.get(guildId, testKey); ok {
 		return checkResult{"In-memory Cache", false, "Cache tidak di-invalidate setelah kvDel"}
 	}
@@ -160,13 +159,13 @@ func checkBotPerms(s *discordgo.Session, guildId string) checkResult {
 		return checkResult{"Bot Permissions", false, fmt.Sprintf("Gagal ambil guild: %v", err)}
 	}
 
-	// Cari bot member
+	// Find bot member in guild
 	member, err := s.GuildMember(guildId, botID)
 	if err != nil {
 		return checkResult{"Bot Permissions", false, fmt.Sprintf("Gagal ambil member: %v", err)}
 	}
 
-	// Hitung effective permissions dari semua role bot
+	// Calculate effective permissions from all bot roles
 	var perms int64
 	for _, roleID := range member.Roles {
 		for _, role := range guild.Roles {
