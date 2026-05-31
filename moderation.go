@@ -19,7 +19,7 @@ var modCmds = map[string]bool{
 	"enable": true, "disable": true, "setlog": true, "setwelcome": true,
 	"setgoodbye": true, "setwelcomemsg": true, "setgoodbyemsg": true,
 	"autorole": true, "removeautorole": true, "setlevelchannel": true,
-	"setpersona": true, "setmodel": true, "rank": true, "leaderboard": true,
+	"setpersona": true, "setmodel": true, "sethistory": true, "rank": true, "leaderboard": true,
 	"afk": true, "afklist": true, "status": true, "summarize": true,
 }
 
@@ -196,6 +196,26 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 		}
 		setGuildModel(guildId, modelId)
 		replyMsg(fmt.Sprintf("✅ Model diganti ke `%s` (`%s`)!", alias, modelId))
+		return true
+	}
+
+	if cmd == "sethistory" {
+		if !hasPerm(discordgo.PermissionAdministrator) {
+			replyMsg("❌ Khusus admin.")
+			return true
+		}
+		if len(args) < 2 {
+			current := getGuildMaxHistory(guildId)
+			replyMsg(fmt.Sprintf("📜 History limit sekarang: **%d** pesan. Untuk mengubah: `%s sethistory <angka>`", current, BOT_PREFIX))
+			return true
+		}
+		limit, err := strconv.Atoi(args[1])
+		if err != nil || limit < 5 || limit > 100 {
+			replyMsg("❌ Masukkan angka antara 5-100.")
+			return true
+		}
+		setGuildMaxHistory(guildId, limit)
+		replyMsg(fmt.Sprintf("✅ History limit diset ke **%d** pesan.", limit))
 		return true
 	}
 
