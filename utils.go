@@ -9,10 +9,6 @@ import (
 
 var startTime = time.Now()
 
-// ============================================================
-// RATE LIMITER — anti spam per user
-// ============================================================
-
 type rateLimiter struct {
 	mu      sync.Mutex
 	lastMsg map[string]int64
@@ -20,7 +16,7 @@ type rateLimiter struct {
 
 var rl = &rateLimiter{lastMsg: make(map[string]int64)}
 
-// isRateLimited returns true kalau user spam (< 2 detik dari pesan terakhir)
+// isRateLimited returns true if the user is sending messages too fast (< 2s apart).
 func isRateLimited(userId string) bool {
 	rl.mu.Lock()
 	defer rl.mu.Unlock()
@@ -33,11 +29,6 @@ func isRateLimited(userId string) bool {
 	return false
 }
 
-// ============================================================
-// AI RATE LIMITER — per user global, max 10 req/menit
-// Mencegah abuse tagihan Groq API di server publik
-// ============================================================
-
 type aiRateLimiter struct {
 	mu        sync.Mutex
 	requests  map[string][]int64 // userId -> timestamps (ms)
@@ -46,19 +37,18 @@ type aiRateLimiter struct {
 var aiRL = &aiRateLimiter{requests: make(map[string][]int64)}
 
 const (
-	AI_RATE_WINDOW = 60 * 1000 // 1 menit dalam ms
-	AI_RATE_MAX    = 10         // max 10 request per menit per user
+	AI_RATE_WINDOW = 60 * 1000 // 1 minute window in ms
+	AI_RATE_MAX    = 10         // max 10 AI requests per user per minute
 )
 
-// isAIRateLimited cek apakah user melebihi limit AI request.
-// Return true = tolak request, false = izinkan.
+// isAIRateLimited returns true if the user has exceeded the AI request limit.
 func isAIRateLimited(userId string) bool {
 	aiRL.mu.Lock()
 	defer aiRL.mu.Unlock()
 	now := time.Now().UnixMilli()
 	windowStart := now - AI_RATE_WINDOW
 
-	// Bersihkan timestamps lama di luar window
+	// Drop timestamps outside the current window
 	var recent []int64
 	for _, t := range aiRL.requests[userId] {
 		if t > windowStart {
@@ -73,10 +63,6 @@ func isAIRateLimited(userId string) bool {
 	aiRL.requests[userId] = append(recent, now)
 	return false
 }
-
-// ============================================================
-// UTILS
-// ============================================================
 
 func getUptime() string {
 	d := time.Since(startTime)
