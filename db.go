@@ -21,21 +21,18 @@ var (
 	dbMu sync.Mutex
 )
 
-// ============================================================
-// IN-MEMORY CACHE untuk config guild (kv store)
-// Menghindari hit SQLite setiap pesan masuk untuk data
-// yang jarang berubah (log channel, welcome, persona, dll).
-// Cache di-invalidate setiap kali kvSet/kvDel dipanggil.
-// ============================================================
+// In-memory cache for per-guild config (kv store).
+// Avoids SQLite reads on every message for rarely-changed data.
+// Invalidated on every kvSet/kvDel call.
 
 type kvCache struct {
 	mu    sync.RWMutex
-	store map[string]string // key: "guildId:key" → value
+	store map[string]string 
 }
 
 var cache = &kvCache{store: make(map[string]string)}
 
-const kvMiss = "\x00MISS" // sentinel: belum pernah di-cache
+const kvMiss = "\x00MISS" // sentinel: key has been looked up but is empty
 
 func (c *kvCache) get(guildId, key string) (string, bool) {
 	c.mu.RLock()
@@ -45,7 +42,7 @@ func (c *kvCache) get(guildId, key string) (string, bool) {
 		return "", false
 	}
 	if v == kvMiss {
-		return "", true // cache hit: tahu nilainya kosong
+		return "", true // cache hit: value is empty
 	}
 	return v, true
 }
@@ -66,15 +63,15 @@ func initDB() {
 	var err error
 	db, err = sql.Open("sqlite", getDBPath()+"?_journal=WAL&_busy_timeout=5000&_timeout=5000")
 	if err != nil {
-		panic(fmt.Sprintf("❌ Gagal buka SQLite: %v", err))
+		panic(fmt.Sprintf("❌ Failed to open SQLite: %v", err))
 	}
 	db.SetMaxOpenConns(1)
 	createTables()
-	fmt.Println("✅ Database SQLite siap")
+	fmt.Println("✅ SQLite database ready")
 }
 
 func flushDB() {
-	// SQLite auto-commit, tidak perlu flush manual
+	// SQLite auto-commits; no manual flush needed
 }
 
 func createTables() {
@@ -131,19 +128,15 @@ func createTables() {
 	}
 }
 
-// ============================================================
-// KV STORE — config per guild, dengan in-memory cache
-// ============================================================
-
 func kvGet(guildId, key string) string {
-	// Cek cache dulu sebelum hit SQLite
+	// Cek cache first before hit SQLite
 	if v, ok := cache.get(guildId, key); ok {
 		return v
 	}
 	var value string
 	err := db.QueryRow(`SELECT value FROM kv WHERE guild_id=? AND key=?`, guildId, key).Scan(&value)
 	if err != nil {
-		// Cache "miss" agar query berikutnya tidak perlu ke SQLite lagi
+		// Cache "miss" So that the next query doesn't need to access SQLite again.
 		cache.set(guildId, key, kvMiss)
 		return ""
 	}
@@ -167,18 +160,10 @@ func kvDel(guildId, key string) {
 	cache.del(guildId, key)
 }
 
-// ============================================================
-// LOG CHANNEL
-// ============================================================
-
 func getGuildLogChannel(guildId string) string { return kvGet(guildId, "log_channel") }
 func setGuildLogChannel(guildId, channelId string) {
 	kvSet(guildId, "log_channel", channelId)
 }
-
-// ============================================================
-// WARNINGS
-// ============================================================
 
 func getWarnings(userId, guildId string) []Warning {
 	rows, err := db.Query(`SELECT reason, time FROM warnings WHERE guild_id=? AND user_id=? ORDER BY id`, guildId, userId)
@@ -216,10 +201,6 @@ func clearWarnings(userId, guildId string) {
 	}
 }
 
-// ============================================================
-// BANNED WORDS
-// ============================================================
-
 func getBannedWords(guildId string) []string {
 	rows, err := db.Query(`SELECT word FROM banned_words WHERE guild_id=?`, guildId)
 	if err != nil {
@@ -251,10 +232,6 @@ func removeBannedWord(guildId, word string) {
 	}
 }
 
-// ============================================================
-// DISABLED CHANNELS
-// ============================================================
-
 func isChannelDisabled(guildId, channelId string) bool {
 	var count int
 	if err := db.QueryRow(`SELECT COUNT(*) FROM disabled_channels WHERE guild_id=? AND channel_id=?`, guildId, channelId).Scan(&count); err != nil {
@@ -275,10 +252,6 @@ func enableChannel(guildId, channelId string) {
 		fmt.Printf("⚠️ enableChannel: %v\n", err)
 	}
 }
-
-// ============================================================
-// CONVERSATION HISTORY
-// ============================================================
 
 type Message struct {
 	Role    string `json:"role"`
@@ -323,10 +296,6 @@ func clearHistory(key string) {
 	}
 }
 
-// ============================================================
-// WELCOME / GOODBYE
-// ============================================================
-
 func getWelcomeChannel(guildId string) string { return kvGet(guildId, "welcome_channel") }
 func setWelcomeChannel(guildId, ch string)    { kvSet(guildId, "welcome_channel", ch) }
 func getGoodbyeChannel(guildId string) string { return kvGet(guildId, "goodbye_channel") }
@@ -350,17 +319,9 @@ func getGoodbyeMessage(guildId string) string {
 }
 func setGoodbyeMessage(guildId, msg string) { kvSet(guildId, "goodbye_msg", msg) }
 
-// ============================================================
-// AUTO ROLE
-// ============================================================
-
 func getAutoRole(guildId string) string   { return kvGet(guildId, "auto_role") }
 func setAutoRole(guildId, roleId string)  { kvSet(guildId, "auto_role", roleId) }
 func removeAutoRole(guildId string)       { kvDel(guildId, "auto_role") }
-
-// ============================================================
-// PERSONA & MODEL
-// ============================================================
 
 func getGuildSystemPrompt(guildId string) string {
 	v := kvGet(guildId, "system_prompt")
@@ -380,16 +341,8 @@ func getGuildModel(guildId string) string {
 }
 func setGuildModel(guildId, model string) { kvSet(guildId, "model", model) }
 
-// ============================================================
-// LEVEL CHANNEL
-// ============================================================
-
 func getLevelChannel(guildId string) string { return kvGet(guildId, "level_channel") }
 func setLevelChannel(guildId, ch string)    { kvSet(guildId, "level_channel", ch) }
-
-// ============================================================
-// XP
-// ============================================================
 
 type XPData struct {
 	XP          int   `json:"xp"`
@@ -443,10 +396,6 @@ func getAllXP(guildId string) []struct {
 	return result
 }
 
-// ============================================================
-// AFK
-// ============================================================
-
 type AFKData struct {
 	Reason string `json:"reason"`
 	Time   int64  `json:"time"`
@@ -495,157 +444,7 @@ func getAllAfk(guildId string) map[string]*AFKData {
 	return result
 }
 
-// Warning struct (dipakai di moderation.go)
-type Warning struct {
-	Reason string
-	Time   string
-}
-==============
-// AUTO ROLE
-// ============================================================
-
-func getAutoRole(guildId string) string   { return kvGet(guildId, "auto_role") }
-func setAutoRole(guildId, roleId string)  { kvSet(guildId, "auto_role", roleId) }
-func removeAutoRole(guildId string)       { kvDel(guildId, "auto_role") }
-
-// ============================================================
-// PERSONA & MODEL
-// ============================================================
-
-func getGuildSystemPrompt(guildId string) string {
-	v := kvGet(guildId, "system_prompt")
-	if v == "" {
-		return DEFAULT_SYSTEM_PROMPT
-	}
-	return v
-}
-func setGuildSystemPrompt(guildId, prompt string) { kvSet(guildId, "system_prompt", prompt) }
-
-func getGuildModel(guildId string) string {
-	v := kvGet(guildId, "model")
-	if v == "" {
-		return DEFAULT_MODEL
-	}
-	return v
-}
-func setGuildModel(guildId, model string) { kvSet(guildId, "model", model) }
-
-// ============================================================
-// LEVEL CHANNEL
-// ============================================================
-
-func getLevelChannel(guildId string) string { return kvGet(guildId, "level_channel") }
-func setLevelChannel(guildId, ch string)    { kvSet(guildId, "level_channel", ch) }
-
-// ============================================================
-// XP
-// ============================================================
-
-type XPData struct {
-	XP          int   `json:"xp"`
-	Level       int   `json:"level"`
-	LastMessage int64 `json:"lastMessage"`
-}
-
-func getUserXP(userId, guildId string) *XPData {
-	data := &XPData{}
-	err := db.QueryRow(`SELECT xp, level, last_message FROM xp WHERE guild_id=? AND user_id=?`, guildId, userId).
-		Scan(&data.XP, &data.Level, &data.LastMessage)
-	if err != nil {
-		return &XPData{}
-	}
-	return data
-}
-
-func setUserXP(userId, guildId string, data *XPData) {
-	if _, err := db.Exec(`INSERT OR REPLACE INTO xp (guild_id, user_id, xp, level, last_message) VALUES (?,?,?,?,?)`,
-		guildId, userId, data.XP, data.Level, data.LastMessage); err != nil {
-		fmt.Printf("⚠️ setUserXP: %v\n", err)
-	}
-}
-
-func getAllXP(guildId string) []struct {
-	UserID string
-	Data   *XPData
-} {
-	rows, err := db.Query(`SELECT user_id, xp, level FROM xp WHERE guild_id=? ORDER BY level DESC, xp DESC LIMIT 10`, guildId)
-	if err != nil {
-		fmt.Printf("⚠️ getAllXP: %v\n", err)
-		return nil
-	}
-	defer rows.Close()
-	var result []struct {
-		UserID string
-		Data   *XPData
-	}
-	for rows.Next() {
-		var uid string
-		data := &XPData{}
-		if err := rows.Scan(&uid, &data.XP, &data.Level); err != nil {
-			fmt.Printf("⚠️ getAllXP scan: %v\n", err)
-			continue
-		}
-		result = append(result, struct {
-			UserID string
-			Data   *XPData
-		}{uid, data})
-	}
-	return result
-}
-
-// ============================================================
-// AFK
-// ============================================================
-
-type AFKData struct {
-	Reason string `json:"reason"`
-	Time   int64  `json:"time"`
-}
-
-func getAfkUser(userId, guildId string) *AFKData {
-	data := &AFKData{}
-	err := db.QueryRow(`SELECT reason, time FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId).
-		Scan(&data.Reason, &data.Time)
-	if err != nil {
-		return nil
-	}
-	return data
-}
-
-func setAfkUser(userId, guildId, reason string) {
-	if _, err := db.Exec(`INSERT OR REPLACE INTO afk (guild_id, user_id, reason, time) VALUES (?,?,?,?)`,
-		guildId, userId, reason, nowMs()); err != nil {
-		fmt.Printf("⚠️ setAfkUser: %v\n", err)
-	}
-}
-
-func removeAfkUser(userId, guildId string) {
-	if _, err := db.Exec(`DELETE FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId); err != nil {
-		fmt.Printf("⚠️ removeAfkUser: %v\n", err)
-	}
-}
-
-func getAllAfk(guildId string) map[string]*AFKData {
-	rows, err := db.Query(`SELECT user_id, reason, time FROM afk WHERE guild_id=?`, guildId)
-	if err != nil {
-		fmt.Printf("⚠️ getAllAfk: %v\n", err)
-		return nil
-	}
-	defer rows.Close()
-	result := make(map[string]*AFKData)
-	for rows.Next() {
-		var uid string
-		data := &AFKData{}
-		if err := rows.Scan(&uid, &data.Reason, &data.Time); err != nil {
-			fmt.Printf("⚠️ getAllAfk scan: %v\n", err)
-			continue
-		}
-		result[uid] = data
-	}
-	return result
-}
-
-// Warning struct (dipakai di moderation.go)
+// Warning struct (use in moderation.go)
 type Warning struct {
 	Reason string
 	Time   string
