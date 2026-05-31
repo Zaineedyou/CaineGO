@@ -36,9 +36,10 @@ type aiRateLimiter struct {
 
 var aiRL = &aiRateLimiter{requests: make(map[string][]int64)}
 
-const (
-	AI_RATE_WINDOW = 60 * 1000 // 1 minute window in ms
-	AI_RATE_MAX    = 10         // max 10 AI requests per user per minute
+// AI rate limit defaults — overridable via AI_RATE_MAX and AI_RATE_WINDOW_SEC in .env
+var (
+	AI_RATE_WINDOW = int64(60 * 1000) // 1 minute in ms
+	AI_RATE_MAX    = 10               // max requests per user per window
 )
 
 // isAIRateLimited returns true if the user has exceeded the AI request limit.
