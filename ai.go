@@ -80,7 +80,7 @@ func askVision(key, userMessage, imageUrl, displayName, guildId string) (string,
 	req.Header.Set("User-Agent", "Mozilla/5.0")
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", fmt.Errorf("gagal fetch gambar: %v", err)
+		return "", fmt.Errorf("failed to fetch image: %v", err)
 	}
 	defer resp.Body.Close()
 
@@ -134,9 +134,8 @@ func askVision(key, userMessage, imageUrl, displayName, guildId string) (string,
 	return reply, nil
 }
 
-// doGroqRequest mengirim request ke Groq API dengan retry otomatis.
-// Retry dilakukan maksimal 3x dengan jeda 2 detik antar percobaan,
-// khusus untuk error sementara (timeout, 429, 5xx).
+// doGroqRequest sends a request to the Groq API with automatic retry.
+// Retries up to 3 times (2s delay) for transient errors: timeouts, 429, 5xx.
 func doGroqRequest(reqBody GroqRequest) (string, error) {
 	jsonData, err := json.Marshal(reqBody)
 	if err != nil {
@@ -150,15 +149,15 @@ func doGroqRequest(reqBody GroqRequest) (string, error) {
 		client := &http.Client{Timeout: 30 * time.Second}
 		req, err := http.NewRequest("POST", GROQ_API_URL, bytes.NewReader(jsonData))
 		if err != nil {
-			return "", fmt.Errorf("buat request gagal: %w", err)
+			return "", fmt.Errorf("failed to create request: %w", err)
 		}
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Authorization", "Bearer "+GROQ_API_KEY)
 
 		resp, err := client.Do(req)
 		if err != nil {
-			// Network error / timeout — coba lagi
-			lastErr = fmt.Errorf("request gagal (percobaan %d/%d): %w", attempt, maxRetries, err)
+			// Network error or timeout — retry
+			lastErr = fmt.Errorf("request failed (attempt %d/%d): %w", attempt, maxRetries, err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
@@ -166,35 +165,35 @@ func doGroqRequest(reqBody GroqRequest) (string, error) {
 		body, err := io.ReadAll(resp.Body)
 		resp.Body.Close()
 		if err != nil {
-			lastErr = fmt.Errorf("baca response gagal: %w", err)
+			lastErr = fmt.Errorf("failed to read response: %w", err)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		// Rate limit atau server error — coba lagi
+		// Rate limit or server error — retry
 		if resp.StatusCode == 429 || resp.StatusCode >= 500 {
-			lastErr = fmt.Errorf("groq HTTP %d (percobaan %d/%d)", resp.StatusCode, attempt, maxRetries)
+			lastErr = fmt.Errorf("groq HTTP %d (attempt %d/%d)", resp.StatusCode, attempt, maxRetries)
 			time.Sleep(2 * time.Second)
 			continue
 		}
 
-		// Error lain (401, 400, dll) — langsung gagal, jangan retry
+		// Non-retriable error (401, 400, etc) — fail immediately
 		if resp.StatusCode != 200 {
 			return "", fmt.Errorf("groq HTTP %d: %s", resp.StatusCode, string(body))
 		}
 
 		var groqResp GroqResponse
 		if err := json.Unmarshal(body, &groqResp); err != nil {
-			return "", fmt.Errorf("parse response gagal: %w", err)
+			return "", fmt.Errorf("failed to parse response: %w", err)
 		}
 		if groqResp.Error != nil {
 			return "", fmt.Errorf("groq error: %s", groqResp.Error.Message)
 		}
 		if len(groqResp.Choices) == 0 || groqResp.Choices[0].Message.Content == "" {
-			return "", fmt.Errorf("groq mengembalikan response kosong")
+			return "", fmt.Errorf("groq returned empty response")
 		}
 		return groqResp.Choices[0].Message.Content, nil
 	}
 
-	return "", fmt.Errorf("groq gagal setelah %d percobaan: %w", maxRetries, lastErr)
+	return "", fmt.Errorf("groq failed after %d attempts: %w", maxRetries, lastErr)
 }
