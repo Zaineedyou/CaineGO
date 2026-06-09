@@ -53,7 +53,7 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
 
 ### 🔒 Security & Privacy
 - **Secure API Handling** — Safe credential management with environment variables
-- **User Privacy** — Minimal data collection, GDPR-conscious design
+- **User Privacy** — Minimal data collection
 - **Permission System** — Granular control over who can use moderation features
 - **No Special User Permissions Required** — Regular users can use AI chat without admin perms
 
@@ -390,7 +390,6 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 - [ ] Web dashboard for server management
 - [ ] Advanced analytics and insights
 - [ ] Custom AI model selection per channel
-- [ ] Music streaming integration
 - [ ] Giveaway and contests system
 - [ ] Advanced anti-spam detection
 - [ ] Multi-language support
