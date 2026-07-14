@@ -3,7 +3,6 @@ FROM golang:1.21-alpine AS builder
 
 WORKDIR /app
 
-# Install build dependencies for modernc/sqlite (pure Go, no CGO needed)
 RUN apk add --no-cache git
 
 COPY go.mod go.sum ./

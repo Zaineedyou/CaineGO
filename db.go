@@ -2,19 +2,20 @@ package main
 
 import (
 	"database/sql"
-	"strconv"
-	"os"
 	"fmt"
+	"os"
+	"strconv"
 	"sync"
 
-	_ "modernc.org/sqlite"
+	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
-func getDBPath() string {
-	if p := os.Getenv("DB_PATH"); p != "" {
-		return p
+func getDatabaseURL() string {
+	if url := os.Getenv("DATABASE_URL"); url != "" {
+		return url
 	}
-	return "./caine.db"
+	// Fallback to a default if needed, but for Railway, DATABASE_URL is expected.
+	return ""
 }
 
 var (
@@ -25,7 +26,7 @@ var (
 // In-memory cache for per-guild config (kv store).
 type kvCache struct {
 	mu    sync.RWMutex
-	store map[string]string 
+	store map[string]string
 }
 
 var cache = &kvCache{store: make(map[string]string)}
@@ -59,13 +60,27 @@ func (c *kvCache) del(guildId, key string) {
 
 func initDB() {
 	var err error
-	db, err = sql.Open("sqlite", getDBPath()+"?_journal=WAL&_busy_timeout=5000&_timeout=5000")
-	if err != nil {
-		panic(fmt.Sprintf("❌ Failed to open SQLite: %v", err))
+	url := getDatabaseURL()
+	if url == "" {
+		panic("❌ DATABASE_URL environment variable is not set")
 	}
-	db.SetMaxOpenConns(1)
+
+	db, err = sql.Open("pgx", url)
+	if err != nil {
+		panic(fmt.Sprintf("❌ Failed to open PostgreSQL: %v", err))
+	}
+
+	// PostgreSQL handles concurrent access much better than SQLite, 
+	// so we can allow more open connections.
+	db.SetMaxOpenConns(25)
+	db.SetMaxIdleConns(5)
+
+	if err := db.Ping(); err != nil {
+		panic(fmt.Sprintf("❌ Failed to connect to PostgreSQL: %v", err))
+	}
+
 	createTables()
-	fmt.Println("✅ SQLite database ready")
+	fmt.Println("✅ PostgreSQL database ready")
 }
 
 func flushDB() {
@@ -83,7 +98,7 @@ func createTables() {
 			PRIMARY KEY (guild_id, key)
 		)`,
 		`CREATE TABLE IF NOT EXISTS warnings (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id SERIAL PRIMARY KEY,
 			guild_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
 			reason TEXT NOT NULL,
@@ -100,7 +115,7 @@ func createTables() {
 			PRIMARY KEY (guild_id, channel_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS history (
-			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			id SERIAL PRIMARY KEY,
 			history_key TEXT NOT NULL,
 			role TEXT NOT NULL,
 			content TEXT NOT NULL
@@ -108,16 +123,16 @@ func createTables() {
 		`CREATE TABLE IF NOT EXISTS xp (
 			guild_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
-			xp INTEGER DEFAULT 0,
+			xp BIGINT DEFAULT 0,
 			level INTEGER DEFAULT 0,
-			last_message INTEGER DEFAULT 0,
+			last_message BIGINT DEFAULT 0,
 			PRIMARY KEY (guild_id, user_id)
 		)`,
 		`CREATE TABLE IF NOT EXISTS afk (
 			guild_id TEXT NOT NULL,
 			user_id TEXT NOT NULL,
 			reason TEXT NOT NULL,
-			time INTEGER NOT NULL,
+			time BIGINT NOT NULL,
 			PRIMARY KEY (guild_id, user_id)
 		)`,
 	}
@@ -129,14 +144,14 @@ func createTables() {
 }
 
 func kvGet(guildId, key string) string {
-	// Cek cache first before hit SQLite
+	// Cek cache first before hit DB
 	if v, ok := cache.get(guildId, key); ok {
 		return v
 	}
 	var value string
-	err := db.QueryRow(`SELECT value FROM kv WHERE guild_id=? AND key=?`, guildId, key).Scan(&value)
+	err := db.QueryRow(`SELECT value FROM kv WHERE guild_id=$1 AND key=$2`, guildId, key).Scan(&value)
 	if err != nil {
-		// Cache "miss" So that the next query doesn't need to access SQLite again.
+		// Cache "miss" So that the next query doesn't need to access DB again.
 		cache.set(guildId, key, kvMiss)
 		return ""
 	}
@@ -145,7 +160,9 @@ func kvGet(guildId, key string) string {
 }
 
 func kvSet(guildId, key, value string) {
-	if _, err := db.Exec(`INSERT OR REPLACE INTO kv (guild_id, key, value) VALUES (?,?,?)`, guildId, key, value); err != nil {
+	query := `INSERT INTO kv (guild_id, key, value) VALUES ($1, $2, $3) 
+			  ON CONFLICT (guild_id, key) DO UPDATE SET value = EXCLUDED.value`
+	if _, err := db.Exec(query, guildId, key, value); err != nil {
 		fmt.Printf("⚠️ kvSet [%s:%s]: %v\n", guildId, key, err)
 		return
 	}
@@ -153,7 +170,7 @@ func kvSet(guildId, key, value string) {
 }
 
 func kvDel(guildId, key string) {
-	if _, err := db.Exec(`DELETE FROM kv WHERE guild_id=? AND key=?`, guildId, key); err != nil {
+	if _, err := db.Exec(`DELETE FROM kv WHERE guild_id=$1 AND key=$2`, guildId, key); err != nil {
 		fmt.Printf("⚠️ kvDel [%s:%s]: %v\n", guildId, key, err)
 		return
 	}
@@ -166,7 +183,7 @@ func setGuildLogChannel(guildId, channelId string) {
 }
 
 func getWarnings(userId, guildId string) []Warning {
-	rows, err := db.Query(`SELECT reason, time FROM warnings WHERE guild_id=? AND user_id=? ORDER BY id`, guildId, userId)
+	rows, err := db.Query(`SELECT reason, time FROM warnings WHERE guild_id=$1 AND user_id=$2 ORDER BY id`, guildId, userId)
 	if err != nil {
 		fmt.Printf("⚠️ getWarnings: %v\n", err)
 		return nil
@@ -185,24 +202,24 @@ func getWarnings(userId, guildId string) []Warning {
 }
 
 func addWarning(userId, guildId, reason string) int {
-	if _, err := db.Exec(`INSERT INTO warnings (guild_id, user_id, reason, time) VALUES (?,?,?,?)`, guildId, userId, reason, nowISO()); err != nil {
+	if _, err := db.Exec(`INSERT INTO warnings (guild_id, user_id, reason, time) VALUES ($1,$2,$3,$4)`, guildId, userId, reason, nowISO()); err != nil {
 		fmt.Printf("⚠️ addWarning: %v\n", err)
 	}
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM warnings WHERE guild_id=? AND user_id=?`, guildId, userId).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM warnings WHERE guild_id=$1 AND user_id=$2`, guildId, userId).Scan(&count); err != nil {
 		fmt.Printf("⚠️ addWarning count: %v\n", err)
 	}
 	return count
 }
 
 func clearWarnings(userId, guildId string) {
-	if _, err := db.Exec(`DELETE FROM warnings WHERE guild_id=? AND user_id=?`, guildId, userId); err != nil {
+	if _, err := db.Exec(`DELETE FROM warnings WHERE guild_id=$1 AND user_id=$2`, guildId, userId); err != nil {
 		fmt.Printf("⚠️ clearWarnings: %v\n", err)
 	}
 }
 
 func getBannedWords(guildId string) []string {
-	rows, err := db.Query(`SELECT word FROM banned_words WHERE guild_id=?`, guildId)
+	rows, err := db.Query(`SELECT word FROM banned_words WHERE guild_id=$1`, guildId)
 	if err != nil {
 		fmt.Printf("⚠️ getBannedWords: %v\n", err)
 		return nil
@@ -221,20 +238,21 @@ func getBannedWords(guildId string) []string {
 }
 
 func addBannedWord(guildId, word string) {
-	if _, err := db.Exec(`INSERT OR IGNORE INTO banned_words (guild_id, word) VALUES (?,?)`, guildId, word); err != nil {
+	query := `INSERT INTO banned_words (guild_id, word) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+	if _, err := db.Exec(query, guildId, word); err != nil {
 		fmt.Printf("⚠️ addBannedWord: %v\n", err)
 	}
 }
 
 func removeBannedWord(guildId, word string) {
-	if _, err := db.Exec(`DELETE FROM banned_words WHERE guild_id=? AND word=?`, guildId, word); err != nil {
+	if _, err := db.Exec(`DELETE FROM banned_words WHERE guild_id=$1 AND word=$2`, guildId, word); err != nil {
 		fmt.Printf("⚠️ removeBannedWord: %v\n", err)
 	}
 }
 
 func isChannelDisabled(guildId, channelId string) bool {
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM disabled_channels WHERE guild_id=? AND channel_id=?`, guildId, channelId).Scan(&count); err != nil {
+	if err := db.QueryRow(`SELECT COUNT(*) FROM disabled_channels WHERE guild_id=$1 AND channel_id=$2`, guildId, channelId).Scan(&count); err != nil {
 		fmt.Printf("⚠️ isChannelDisabled: %v\n", err)
 		return false
 	}
@@ -242,13 +260,14 @@ func isChannelDisabled(guildId, channelId string) bool {
 }
 
 func disableChannel(guildId, channelId string) {
-	if _, err := db.Exec(`INSERT OR IGNORE INTO disabled_channels (guild_id, channel_id) VALUES (?,?)`, guildId, channelId); err != nil {
+	query := `INSERT INTO disabled_channels (guild_id, channel_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`
+	if _, err := db.Exec(query, guildId, channelId); err != nil {
 		fmt.Printf("⚠️ disableChannel: %v\n", err)
 	}
 }
 
 func enableChannel(guildId, channelId string) {
-	if _, err := db.Exec(`DELETE FROM disabled_channels WHERE guild_id=? AND channel_id=?`, guildId, channelId); err != nil {
+	if _, err := db.Exec(`DELETE FROM disabled_channels WHERE guild_id=$1 AND channel_id=$2`, guildId, channelId); err != nil {
 		fmt.Printf("⚠️ enableChannel: %v\n", err)
 	}
 }
@@ -259,7 +278,7 @@ type Message struct {
 }
 
 func getHistory(key string) []Message {
-	rows, err := db.Query(`SELECT role, content FROM history WHERE history_key=? ORDER BY id`, key)
+	rows, err := db.Query(`SELECT role, content FROM history WHERE history_key=$1 ORDER BY id`, key)
 	if err != nil {
 		fmt.Printf("⚠️ getHistory: %v\n", err)
 		return nil
@@ -278,20 +297,21 @@ func getHistory(key string) []Message {
 }
 
 func addToHistory(key, role, content string) {
-	if _, err := db.Exec(`INSERT INTO history (history_key, role, content) VALUES (?,?,?)`, key, role, content); err != nil {
+	if _, err := db.Exec(`INSERT INTO history (history_key, role, content) VALUES ($1,$2,$3)`, key, role, content); err != nil {
 		fmt.Printf("⚠️ addToHistory: %v\n", err)
 		return
 	}
 	// Trim kalau terlalu panjang — simpan MAX_HISTORY*2 entry terakhir
-	if _, err := db.Exec(`DELETE FROM history WHERE history_key=? AND id NOT IN (
-		SELECT id FROM history WHERE history_key=? ORDER BY id DESC LIMIT ?
-	)`, key, key, MAX_HISTORY*2); err != nil {
+	query := `DELETE FROM history WHERE history_key=$1 AND id NOT IN (
+		SELECT id FROM history WHERE history_key=$2 ORDER BY id DESC LIMIT $3
+	)`
+	if _, err := db.Exec(query, key, key, MAX_HISTORY*2); err != nil {
 		fmt.Printf("⚠️ addToHistory trim: %v\n", err)
 	}
 }
 
 func clearHistory(key string) {
-	if _, err := db.Exec(`DELETE FROM history WHERE history_key=?`, key); err != nil {
+	if _, err := db.Exec(`DELETE FROM history WHERE history_key=$1`, key); err != nil {
 		fmt.Printf("⚠️ clearHistory: %v\n", err)
 	}
 }
@@ -352,7 +372,7 @@ type XPData struct {
 
 func getUserXP(userId, guildId string) *XPData {
 	data := &XPData{}
-	err := db.QueryRow(`SELECT xp, level, last_message FROM xp WHERE guild_id=? AND user_id=?`, guildId, userId).
+	err := db.QueryRow(`SELECT xp, level, last_message FROM xp WHERE guild_id=$1 AND user_id=$2`, guildId, userId).
 		Scan(&data.XP, &data.Level, &data.LastMessage)
 	if err != nil {
 		return &XPData{}
@@ -361,8 +381,9 @@ func getUserXP(userId, guildId string) *XPData {
 }
 
 func setUserXP(userId, guildId string, data *XPData) {
-	if _, err := db.Exec(`INSERT OR REPLACE INTO xp (guild_id, user_id, xp, level, last_message) VALUES (?,?,?,?,?)`,
-		guildId, userId, data.XP, data.Level, data.LastMessage); err != nil {
+	query := `INSERT INTO xp (guild_id, user_id, xp, level, last_message) VALUES ($1, $2, $3, $4, $5)
+			  ON CONFLICT (guild_id, user_id) DO UPDATE SET xp = EXCLUDED.xp, level = EXCLUDED.level, last_message = EXCLUDED.last_message`
+	if _, err := db.Exec(query, guildId, userId, data.XP, data.Level, data.LastMessage); err != nil {
 		fmt.Printf("⚠️ setUserXP: %v\n", err)
 	}
 }
@@ -371,7 +392,7 @@ func getAllXP(guildId string) []struct {
 	UserID string
 	Data   *XPData
 } {
-	rows, err := db.Query(`SELECT user_id, xp, level FROM xp WHERE guild_id=? ORDER BY level DESC, xp DESC LIMIT 10`, guildId)
+	rows, err := db.Query(`SELECT user_id, xp, level FROM xp WHERE guild_id=$1 ORDER BY level DESC, xp DESC LIMIT 10`, guildId)
 	if err != nil {
 		fmt.Printf("⚠️ getAllXP: %v\n", err)
 		return nil
@@ -403,7 +424,7 @@ type AFKData struct {
 
 func getAfkUser(userId, guildId string) *AFKData {
 	data := &AFKData{}
-	err := db.QueryRow(`SELECT reason, time FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId).
+	err := db.QueryRow(`SELECT reason, time FROM afk WHERE guild_id=$1 AND user_id=$2`, guildId, userId).
 		Scan(&data.Reason, &data.Time)
 	if err != nil {
 		return nil
@@ -412,20 +433,21 @@ func getAfkUser(userId, guildId string) *AFKData {
 }
 
 func setAfkUser(userId, guildId, reason string) {
-	if _, err := db.Exec(`INSERT OR REPLACE INTO afk (guild_id, user_id, reason, time) VALUES (?,?,?,?)`,
-		guildId, userId, reason, nowMs()); err != nil {
+	query := `INSERT INTO afk (guild_id, user_id, reason, time) VALUES ($1, $2, $3, $4)
+			  ON CONFLICT (guild_id, user_id) DO UPDATE SET reason = EXCLUDED.reason, time = EXCLUDED.time`
+	if _, err := db.Exec(query, guildId, userId, reason, nowMs()); err != nil {
 		fmt.Printf("⚠️ setAfkUser: %v\n", err)
 	}
 }
 
 func removeAfkUser(userId, guildId string) {
-	if _, err := db.Exec(`DELETE FROM afk WHERE guild_id=? AND user_id=?`, guildId, userId); err != nil {
+	if _, err := db.Exec(`DELETE FROM afk WHERE guild_id=$1 AND user_id=$2`, guildId, userId); err != nil {
 		fmt.Printf("⚠️ removeAfkUser: %v\n", err)
 	}
 }
 
 func getAllAfk(guildId string) map[string]*AFKData {
-	rows, err := db.Query(`SELECT user_id, reason, time FROM afk WHERE guild_id=?`, guildId)
+	rows, err := db.Query(`SELECT user_id, reason, time FROM afk WHERE guild_id=$1`, guildId)
 	if err != nil {
 		fmt.Printf("⚠️ getAllAfk: %v\n", err)
 		return nil
