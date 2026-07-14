@@ -48,10 +48,4 @@ func respondDashboardMain(s *discordgo.Session, i *discordgo.InteractionCreate) 
 	})
 }
 
-func backRow() discordgo.ActionsRow {
-	return discordgo.ActionsRow{
-		Components: []discordgo.MessageComponent{
-			discordgo.Button{Label: "◀ Kembali", CustomID: "dash_back", Style: discordgo.SecondaryButton},
-		},
-	}
-}
+

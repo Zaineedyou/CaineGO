@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/bwmarrin/discordgo"
@@ -90,7 +91,7 @@ func handleButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 		}
 		var disabledChs []string
 		for _, id := range func() []string {
-			rows, _ := db.Query(`SELECT channel_id FROM disabled_channels WHERE guild_id=?`, guildId)
+			rows, _ := db.Query(`SELECT channel_id FROM disabled_channels WHERE guild_id=$1`, guildId)
 			if rows == nil {
 				return nil
 			}
@@ -294,7 +295,7 @@ func handleButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 			},
 		})
 	case "dash_resetpersona":
-		db.Exec(`DELETE FROM kv WHERE guild_id=? AND key='system_prompt'`, guildId)
+		kvDel(guildId, "system_prompt")
 		ephemeralReply("✅ Persona direset ke default.")
 
 	case "dash_model":
@@ -392,9 +393,15 @@ func handleButtonInteraction(s *discordgo.Session, i *discordgo.InteractionCreat
 			CustomID: "modal_sethistory", Title: "Set History Limit",
 			Components: []discordgo.MessageComponent{
 				discordgo.ActionsRow{Components: []discordgo.MessageComponent{
-					discordgo.TextInput{CustomID: "limit", Label: "Jumlah pesan (5-100)", Style: discordgo.TextInputShort, Required: true, Placeholder: fmt.Sprintf("Default: %d", MAX_HISTORY)},
+					discordgo.TextInput{CustomID: "limit", Label: "Limit History (min 5, max 50)", Style: discordgo.TextInputShort, Required: true, Placeholder: "Contoh: 15", Value: strconv.Itoa(getGuildMaxHistory(guildId))},
 				}},
 			},
 		})
 	}
+}
+
+func backRow() discordgo.ActionsRow {
+	return discordgo.ActionsRow{Components: []discordgo.MessageComponent{
+		discordgo.Button{Label: "⬅️ Kembali", CustomID: "dash_back", Style: discordgo.SecondaryButton},
+	}}
 }
