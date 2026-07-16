@@ -488,3 +488,6 @@ func getGuildMaxHistory(guildId string) int {
 func setGuildMaxHistory(guildId string, limit int) {
 	kvSet(guildId, "max_history", strconv.Itoa(limit))
 }
+
+func getBridgeChannel(guildId string) string { return kvGet(guildId, "bridge_channel") }
+func setBridgeChannel(guildId, ch string)     { kvSet(guildId, "bridge_channel", ch) }
