@@ -97,6 +97,17 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 		return
 	}
 
+	if m.GuildID != "" {
+		bridgeCh := getBridgeChannel(m.GuildID)
+		if bridgeCh != "" && m.ChannelID == bridgeCh && strings.TrimSpace(m.Content) != "" {
+			displayName := m.Author.Username
+			if mem, err := s.GuildMember(m.GuildID, m.Author.ID); err == nil && mem.Nick != "" {
+				displayName = mem.Nick
+			}
+			SendToMinecraft(m.GuildID, displayName, m.Content)
+		}
+	}
+
 	if isRateLimited(m.Author.ID) {
 		return
 	}
@@ -215,7 +226,7 @@ func onMessageCreate(s *discordgo.Session, m *discordgo.MessageCreate) {
 			"`/info` — info bot\n" +
 			"`/dashboard` — buka dashboard (admin)\n\n" +
 			"**Moderasi:** kick, ban, unban, timeout, untimeout, warn, warnings, clearwarn, clear, lock, unlock, slowmode, nick, role add/remove\n\n" +
-			"**Admin:** addword, removeword, words, enable, disable, setlog, setwelcome, setgoodbye, setwelcomemsg, setgoodbyemsg, autorole, removeautorole, setlevelchannel, setpersona, setmodel, sethistory"
+			"**Admin:** addword, removeword, words, enable, disable, setlog, setwelcome, setgoodbye, setwelcomemsg, setgoodbyemsg, autorole, removeautorole, setlevelchannel, setpersona, setmodel, sethistory, setbridge, bridgestatus"
 		s.ChannelMessageSendReply(m.ChannelID, helpText, m.Reference())
 		return
 	}

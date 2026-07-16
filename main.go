@@ -109,6 +109,8 @@ func runBot() {
 	}
 	defer dg.Close()
 
+	go StartBridgeServer(dg)
+
 	fmt.Println("✅ Bot running. Press CTRL-C to exit.")
 
 	select {}

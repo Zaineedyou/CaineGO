@@ -21,6 +21,7 @@ var modCmds = map[string]bool{
 	"autorole": true, "removeautorole": true, "setlevelchannel": true,
 	"setpersona": true, "setmodel": true, "sethistory": true, "rank": true, "leaderboard": true,
 	"afk": true, "afklist": true, "status": true, "summarize": true,
+	"setbridge": true, "bridgestatus": true,
 }
 
 func handleModeration(s *discordgo.Session, m *discordgo.Message, userText string) bool {
@@ -728,6 +729,37 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			}
 		}
 		go summarizeChannel(s, m, limit)
+		return true
+	}
+
+	// SETBRIDGE
+	if cmd == "setbridge" {
+		if !hasPerm(discordgo.PermissionAdministrator) {
+			replyMsg("❌ Khusus admin.")
+			return true
+		}
+		if len(m.MentionChannels) == 0 {
+			replyMsg("❌ Mention channel-nya. Contoh: `Caine setbridge #minecraft-chat`")
+			return true
+		}
+		chId := m.MentionChannels[0].ID
+		setBridgeChannel(guildId, chId)
+		replyMsg(fmt.Sprintf("✅ Chat Minecraft akan di-bridge ke <#%s>! Pastikan plugin Minecraft-nya sudah connect ya.", chId))
+		return true
+	}
+
+	// BRIDGESTATUS
+	if cmd == "bridgestatus" {
+		chId := getBridgeChannel(guildId)
+		if chId == "" {
+			replyMsg("⚠️ Bridge channel belum di-set. Pakai `Caine setbridge #channel` dulu.")
+			return true
+		}
+		if isBridgeConnected(guildId) {
+			replyMsg(fmt.Sprintf("✅ Bridge aktif — server Minecraft terhubung. Channel: <#%s>", chId))
+		} else {
+			replyMsg(fmt.Sprintf("🔴 Bridge channel: <#%s>, tapi server Minecraft belum/tidak terhubung.", chId))
+		}
 		return true
 	}
 
