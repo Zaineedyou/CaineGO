@@ -4,12 +4,31 @@ import (
 	"fmt"
 	"crypto/rand"
 	"math/big"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/bwmarrin/discordgo"
 )
+
+// channelMentionRegex menangkap channel mention dalam bentuk <#123456789>
+// langsung dari raw text pesan. Dipakai sebagai fallback karena m.MentionChannels
+// dari discordgo tidak selalu terisi untuk mention channel biasa.
+var channelMentionRegex = regexp.MustCompile(`<#(\d+)>`)
+
+// extractChannelMention mengambil channel ID pertama yang di-mention dalam pesan,
+// coba dari m.MentionChannels dulu, fallback ke regex parsing dari raw content.
+func extractChannelMention(m *discordgo.Message) string {
+	if len(m.MentionChannels) > 0 {
+		return m.MentionChannels[0].ID
+	}
+	matches := channelMentionRegex.FindStringSubmatch(m.Content)
+	if len(matches) > 1 {
+		return matches[1]
+	}
+	return ""
+}
 
 var modCmds = map[string]bool{
 	"kick": true, "ban": true, "unban": true, "timeout": true, "untimeout": true,
@@ -741,11 +760,11 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Khusus admin.")
 			return true
 		}
-		if len(m.MentionChannels) == 0 {
+		chId := extractChannelMention(m)
+		if chId == "" {
 			replyMsg("❌ Mention channel-nya. Contoh: `Caine setbridge #minecraft-chat`")
 			return true
 		}
-		chId := m.MentionChannels[0].ID
 		setBridgeChannel(guildId, chId)
 		replyMsg(fmt.Sprintf("✅ Chat Minecraft akan di-bridge ke <#%s>! Pastikan plugin Minecraft-nya sudah connect ya.", chId))
 		return true
