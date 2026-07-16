@@ -41,6 +41,9 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 	member, _ := s.GuildMember(guildId, m.Author.ID)
 
 	hasPerm := func(perm int64) bool {
+		if BOT_OWNER_ID != "" && m.Author.ID == BOT_OWNER_ID {
+			return true
+		}
 		if member == nil {
 			return false
 		}
