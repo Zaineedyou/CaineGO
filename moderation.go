@@ -174,11 +174,11 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Khusus admin.")
 			return true
 		}
-		if len(m.MentionChannels) == 0 {
+		chId := extractChannelMention(m)
+		if chId == "" {
 			replyMsg("❌ Mention channel-nya.")
 			return true
 		}
-		chId := m.MentionChannels[0].ID
 		setLevelChannel(guildId, chId)
 		replyMsg(fmt.Sprintf("✅ Notif level up akan dikirim ke <#%s>!", chId))
 		return true
@@ -273,12 +273,13 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Khusus admin.")
 			return true
 		}
-		if len(m.MentionChannels) == 0 {
+		chId := extractChannelMention(m)
+		if chId == "" {
 			replyMsg("❌ Mention channel-nya.")
 			return true
 		}
-		setWelcomeChannel(guildId, m.MentionChannels[0].ID)
-		replyMsg(fmt.Sprintf("✅ Channel welcome diset ke <#%s>!", m.MentionChannels[0].ID))
+		setWelcomeChannel(guildId, chId)
+		replyMsg(fmt.Sprintf("✅ Channel welcome diset ke <#%s>!", chId))
 		return true
 	}
 	if cmd == "setgoodbye" {
@@ -286,12 +287,13 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Khusus admin.")
 			return true
 		}
-		if len(m.MentionChannels) == 0 {
+		chId := extractChannelMention(m)
+		if chId == "" {
 			replyMsg("❌ Mention channel-nya.")
 			return true
 		}
-		setGoodbyeChannel(guildId, m.MentionChannels[0].ID)
-		replyMsg(fmt.Sprintf("✅ Channel goodbye diset ke <#%s>!", m.MentionChannels[0].ID))
+		setGoodbyeChannel(guildId, chId)
+		replyMsg(fmt.Sprintf("✅ Channel goodbye diset ke <#%s>!", chId))
 		return true
 	}
 	if cmd == "setwelcomemsg" {
@@ -327,12 +329,13 @@ func handleModeration(s *discordgo.Session, m *discordgo.Message, userText strin
 			replyMsg("❌ Khusus admin.")
 			return true
 		}
-		if len(m.MentionChannels) == 0 {
+		chId := extractChannelMention(m)
+		if chId == "" {
 			replyMsg("❌ Mention channel log-nya.")
 			return true
 		}
-		setGuildLogChannel(guildId, m.MentionChannels[0].ID)
-		replyMsg(fmt.Sprintf("✅ Channel log diset ke <#%s>!", m.MentionChannels[0].ID))
+		setGuildLogChannel(guildId, chId)
+		replyMsg(fmt.Sprintf("✅ Channel log diset ke <#%s>!", chId))
 		return true
 	}
 
