@@ -115,4 +115,3 @@ func runBot() {
 
 	select {}
 }
-
