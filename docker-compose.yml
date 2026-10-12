@@ -1,12 +1,34 @@
 services:
+  db:
+    image: postgres:16-alpine
+    container_name: caine-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-caine}
+      POSTGRES_USER: ${POSTGRES_USER:-caine}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-caine} -d ${POSTGRES_DB:-caine}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
+
   caine:
     build: .
     container_name: caine-bot
     restart: unless-stopped
     env_file:
       - .env
-    volumes:
-      # Persist SQLite database di luar container
-      - ./data:/app/data
+    ports:
+      - "${BRIDGE_PORT:-8080}:${BRIDGE_PORT:-8080}"
     environment:
-      - DB_PATH=/app/data/caine.db
+      DATABASE_URL: "postgres://${POSTGRES_USER:-caine}:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@db:5432/${POSTGRES_DB:-caine}?sslmode=disable"
+    depends_on:
+      db:
+        condition: service_healthy
+
+volumes:
+  postgres_data:

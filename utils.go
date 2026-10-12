@@ -30,8 +30,8 @@ func isRateLimited(userId string) bool {
 }
 
 type aiRateLimiter struct {
-	mu        sync.Mutex
-	requests  map[string][]int64 // userId -> timestamps (ms)
+	mu       sync.Mutex
+	requests map[string][]int64 // userId -> timestamps (ms)
 }
 
 var aiRL = &aiRateLimiter{requests: make(map[string][]int64)}
@@ -75,23 +75,38 @@ func getUptime() string {
 }
 
 func splitMessage(text string, maxLength int) []string {
-	if len(text) <= maxLength {
+	if maxLength <= 0 {
+		return []string{text}
+	}
+	runes := []rune(text)
+	if len(runes) <= maxLength {
 		return []string{text}
 	}
 	var chunks []string
-	current := ""
-	for _, line := range strings.Split(text, "\n") {
-		if len(current)+len(line) > maxLength {
-			if current != "" {
-				chunks = append(chunks, strings.TrimSpace(current))
+	for len(runes) > maxLength {
+		cut := maxLength
+		minCut := maxLength / 2
+		foundBoundary := false
+		for i := cut - 1; i >= minCut; i-- {
+			if runes[i] == '\n' {
+				cut = i + 1
+				foundBoundary = true
+				break
 			}
-			current = line + "\n"
-		} else {
-			current += line + "\n"
 		}
+		if !foundBoundary {
+			for i := cut - 1; i >= minCut; i-- {
+				if runes[i] == ' ' || runes[i] == '\t' {
+					cut = i + 1
+					break
+				}
+			}
+		}
+		chunks = append(chunks, string(runes[:cut]))
+		runes = runes[cut:]
 	}
-	if strings.TrimSpace(current) != "" {
-		chunks = append(chunks, strings.TrimSpace(current))
+	if len(runes) > 0 {
+		chunks = append(chunks, string(runes))
 	}
 	return chunks
 }

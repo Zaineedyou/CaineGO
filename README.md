@@ -1,6 +1,6 @@
 # 🤖 CaineGO
 
-A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI** — delivering lightning-fast AI conversations, intelligent moderation, leveling systems, and more to your community.
+A Discord bot built in **Go** and powered by **Groq AI**, with chat, moderation, leveling, and server utilities.
 
 <div align="center">
 
@@ -34,8 +34,8 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
 ### 📊 Leveling System
 - **Automatic XP Tracking** — Members earn XP for participation and messages
 - **Leaderboards** — Compete with other community members and rank up
-- **Level-Up Notifications** — Custom notifications when members reach new levels
-- **Role Rewards** — Assign special roles at specific level thresholds
+- **Level-Up Notifications** — Custom notifications when members reach a new level
+- **Rank Commands** — View member XP and levels with `rank` and `leaderboard`
 
 ### 💤 Additional Features
 - **AFK System** — Set AFK status with custom reasons, auto-unafk on message
@@ -46,14 +46,14 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
 
 ### ⚡ Performance & Reliability
 - **Built in Go** — Blazing-fast execution and minimal resource usage
-- **SQLite Database** — Lightweight, zero-configuration persistent storage
+- **PostgreSQL Database** — Persistent storage for bot settings and feature data
 - **Docker Ready** — Easy deployment with included Docker configuration
 - **Health Checks** — Built-in monitoring and self-diagnostics
-- **Pure Go SQLite** — No CGO dependencies, truly portable
+- **Go 1.25** — The version declared by the Go module and Docker build image
 
 ### 🔒 Security & Privacy
 - **Secure API Handling** — Safe credential management with environment variables
-- **User Privacy** — Minimal data collection
+- **Data handling** — Conversation history and feature data are stored in PostgreSQL; guild-channel history is shared by channel (see Database below)
 - **Permission System** — Granular control over who can use moderation features
 - **No Special User Permissions Required** — Regular users can use AI chat without admin perms
 
@@ -63,7 +63,8 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
 
 ### Prerequisites
 
-- **Go** 1.21 or higher
+- **Go** 1.25 or higher (for running directly)
+- **PostgreSQL** (for running directly; Docker Compose starts one for you)
 - **Discord Bot Token** (from [Discord Developer Portal](https://discord.com/developers/applications))
 - **Groq API Key** (free tier available at [Groq Console](https://console.groq.com))
 
@@ -83,14 +84,16 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
    nano .env  # or your favorite editor
    ```
 
-3. **Install dependencies and run:**
+3. **Set `DATABASE_URL` in `.env` to a reachable PostgreSQL database**, then install dependencies and run:
    ```bash
-   go mod tidy
+   go mod download
+   go test ./...
+   go vet ./...
    go build -o caine .
    ./caine
    ```
 
-#### Option 2: Docker (Recommended for Production)
+#### Option 2: Docker Compose
 
 1. **Clone and configure:**
    ```bash
@@ -114,13 +117,22 @@ A powerful, production-ready Discord bot built in **Go**, powered by **Groq AI**
 # Required
 DISCORD_TOKEN=your_discord_bot_token
 GROQ_API_KEY=your_groq_api_key
+DATABASE_URL=postgres://caine:change-me@localhost:5432/caine?sslmode=disable
 
 # Optional
-BOT_PREFIX=Caine                    # Command prefix (default: Caine)
-SYSTEM_PROMPT=                      # Custom AI persona
-DB_PATH=./caine.db                  # Database location (default: ./caine.db)
-LOG_LEVEL=info                      # Log verbosity (default: info)
+BOT_PREFIX=Caine            # Command prefix (default: Caine)
+SYSTEM_PROMPT=              # Custom AI persona
+BOT_OWNER_ID=               # Optional bot owner ID
+MAX_HISTORY=30              # Default history limit
+AI_RATE_MAX=10              # AI requests per user per time window
+AI_RATE_WINDOW_SEC=60       # AI rate-limit window in seconds
+BRIDGE_TOKEN=               # Optional Minecraft bridge token
+BRIDGE_PORT=8080            # Optional Minecraft bridge port
 ```
+
+For Docker Compose, also set `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` in `.env`. Compose supplies the container hostname `db` to the bot automatically. Replace the sample database password before deployment. For a direct host run, use a PostgreSQL URL reachable from that host (normally `localhost`, not `db`).
+
+The optional Minecraft bridge uses `BRIDGE_TOKEN` for bearer-token authentication and listens on `BRIDGE_PORT`. Docker Compose publishes that port; leave the token unset to keep bridge connections disabled.
 
 ### First Steps After Installation
 
@@ -213,6 +225,8 @@ Caine setgoodbyemsg <msg>     # Set custom goodbye message
 Caine autorole @role          # Auto-assign role on join
 Caine removeautorole          # Remove auto-role
 Caine setlevelchannel #chan   # Level-up notification channel
+Caine setbridge #channel     # Minecraft bridge output channel
+Caine bridgestatus           # Check bridge connection status
 Caine enable #channel         # Enable bot in channel
 Caine disable #channel        # Disable bot in channel
 Caine status                  # Bot status info
@@ -278,10 +292,11 @@ docker compose up -d --build
 
 ### Database
 
-- **Type:** SQLite (pure Go, no external dependencies)
-- **Location:** `./caine.db` (configurable via `DB_PATH`)
-- **Stores:** User XP/levels, mod logs, server settings, AFK statuses, banned words
-- **Auto-created:** On first run
+- **Type:** PostgreSQL, configured with the required `DATABASE_URL` environment variable
+- **Docker Compose:** Starts a PostgreSQL 16 container and waits for its health check before starting the bot
+- **Stores:** Conversation history, warnings, XP/levels, AFK data, banned words, and per-server settings
+- **Guild-channel memory:** Turns from all users in one guild text channel share the same AI history. `Caine reset` clears that channel's shared history. Direct-message history is scoped to the user's ID.
+- **Schema:** Tables are created on startup; back up the PostgreSQL database volume or database service separately
 
 ---
 
@@ -309,15 +324,15 @@ docker compose up -d --build
 
 ### Database errors
 
-- ✅ Check write permissions in bot's working directory: `chmod 755 .`
-- ✅ Verify disk space available
-- ✅ Check SQLite isn't locked by another process
+- ✅ Check that `DATABASE_URL` is set and points to a reachable PostgreSQL server
+- ✅ For Docker Compose, confirm the database health check passes: `docker compose ps`
+- ✅ Check the PostgreSQL username, password, and database name
 
 ### Bot keeps crashing
 
 - Check logs: `docker compose logs` or `tail -f caine.log`
 - Verify all environment variables are set
-- Ensure Go 1.21+ installed (for direct run)
+- Ensure Go 1.25+ is installed (for direct run)
 
 ---
 
@@ -325,19 +340,23 @@ docker compose up -d --build
 
 ```
 CaineGO/
-├── main.go              # Bot initialization & event handlers
-├── ai.go                # Groq AI integration & chat logic
-├── moderation.go        # Moderation system & enforcement
-├── db.go                # SQLite database & data models
-├── healthcheck.go       # Health monitoring & diagnostics
-├── logging.go           # Structured logging setup
-├── utils.go             # Helper functions & utilities
-├── Dockerfile           # Docker container configuration
-├── docker-compose.yml   # Docker Compose orchestration
-├── go.mod               # Go module dependencies
-├── go.sum               # Dependency checksums
-├── .env.example         # Example environment configuration
-└── LICENSE              # MIT License
+├── ai.go                    # Groq chat and vision requests
+├── bridge.go                # Optional Minecraft WebSocket bridge
+├── buttons.go               # Dashboard button handlers
+├── dashboard.go             # Dashboard entry point
+├── db.go                    # PostgreSQL access and data models
+├── events.go                # Discord event handlers and chat routing
+├── healthcheck.go           # Health checks
+├── interactions.go          # Slash-command dispatch
+├── moderation.go            # Moderation and server commands
+├── utils.go                 # Helpers, including Discord message splitting
+├── utils_test.go            # Utility unit tests
+├── .github/workflows/ci.yml # Test, vet, and build workflow
+├── Dockerfile               # Container image
+├── docker-compose.yml       # Bot plus PostgreSQL services
+├── go.mod                   # Go module and toolchain version
+├── .env.example             # Example environment configuration
+└── LICENSE                  # MIT License
 ```
 
 ---
@@ -345,6 +364,14 @@ CaineGO/
 ## 🤝 Contributing
 
 We welcome contributions! To contribute:
+
+Before opening a pull request, run the project checks:
+
+```bash
+go test ./...
+go vet ./...
+go build ./...
+```
 
 1. **Fork the repository**
 2. **Create a feature branch:**
@@ -373,7 +400,7 @@ This project is licensed under the **MIT License** — see the [LICENSE](LICENSE
 
 - **[discordgo](https://github.com/bwmarrin/discordgo)** — Go Discord API wrapper
 - **[Groq API](https://console.groq.com)** — Ultra-fast AI inference
-- **[modernc/sqlite](https://gitlab.com/cznic/sqlite)** — Pure Go SQLite (no CGO needed)
+- **[pgx](https://github.com/jackc/pgx)** — PostgreSQL driver and `database/sql` adapter
 
 ---
 

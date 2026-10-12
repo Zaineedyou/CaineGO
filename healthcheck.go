@@ -75,7 +75,7 @@ type checkResult struct {
 func runHealthChecks(s *discordgo.Session, guildId string) []checkResult {
 	var results []checkResult
 
-	// SQLite read/write
+	// PostgreSQL read/write
 	results = append(results, checkDB(guildId))
 
 	// In-memory cache consistency
@@ -102,9 +102,9 @@ func checkDB(guildId string) checkResult {
 	kvDel(guildId, testKey)
 
 	if got != testVal {
-		return checkResult{"Database (SQLite)", false, fmt.Sprintf("Write OK tapi read dapat `%s`", got)}
+		return checkResult{"Database (PostgreSQL)", false, fmt.Sprintf("Write OK tapi read dapat `%s`", got)}
 	}
-	return checkResult{"Database (SQLite)", true, "Read/write OK"}
+	return checkResult{"Database (PostgreSQL)", true, "Read/write OK"}
 }
 
 func checkCache(guildId string) checkResult {
