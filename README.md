@@ -2,7 +2,7 @@
 
 [![Go](https://img.shields.io/badge/Go-1.25-00ADD8?logo=go&logoColor=white)](https://go.dev/)
 [![CI](https://github.com/Zaineedyou/CaineGO/actions/workflows/ci.yml/badge.svg)](https://github.com/Zaineedyou/CaineGO/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: AGPL-3.0-only](https://img.shields.io/badge/License-AGPL--3.0--only-blue.svg)](LICENSE)
 
 CaineGO is a self-hosted Discord bot written in Go. It combines Groq-powered chat, server moderation, community features, and an optional Minecraft WebSocket bridge.
 
@@ -131,4 +131,4 @@ GitHub Actions runs these checks for pushes and pull requests targeting `main`.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+GNU Affero General Public License v3.0 only. See [LICENSE](LICENSE).
